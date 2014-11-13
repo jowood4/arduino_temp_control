@@ -10,6 +10,7 @@
 class MAX31855_H
 {
 public:
+	MAX31855(void);
 	void setup(uint8_t data, uint8_t clock, uint8_t latch);
 	uint8_t spi_shift(void);
 	void read_temp(void);

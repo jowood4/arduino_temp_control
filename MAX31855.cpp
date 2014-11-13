@@ -1,5 +1,9 @@
 #include "MAX31855.h"
 
+MAX31855::MAX31855(void)
+{
+}
+
 int MAX31855::setup(uint8_t data, uint8_t clock, uint8_t latch)
 {
 	_data = data; 
