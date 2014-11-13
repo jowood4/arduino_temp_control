@@ -7,45 +7,23 @@
  #include "WProgram.h"
 #endif
 
-#define DHTLIB_OK                0
-#define DHTLIB_ERROR_CHECKSUM   -1
-#define DHTLIB_ERROR_TIMEOUT    -2
-#define DHTLIB_INVALID_VALUE    -999
-
-#define DHTLIB_DHT11_WAKEUP     18
-#define DHTLIB_DHT_WAKEUP       1
-
-// max timeout is 100 usec.
-// For a 16 Mhz proc 100 usec is 1600 clock cycles
-// loops using DHTLIB_TIMEOUT use at least 4 clock cycli
-// so 100 us takes max 400 loops
-// so by dividing F_CPU by 40000 we "fail" as fast as possible
-#define DHTLIB_TIMEOUT (F_CPU/40000)
-
 class MAX31855_H
 {
 public:
-    // return values:
-    // DHTLIB_OK
-    // DHTLIB_ERROR_CHECKSUM
-    // DHTLIB_ERROR_TIMEOUT
-    int read11(uint8_t pin);
-    int read(uint8_t pin);
+	void setup(uint8_t data, uint8_t clock, uint8_t latch);
+	uint8_t spi_shift(void);
+	void read_temp(void);
 
-    inline int read21(uint8_t pin) { return read(pin); };
-    inline int read22(uint8_t pin) { return read(pin); };
-    inline int read33(uint8_t pin) { return read(pin); };
-    inline int read44(uint8_t pin) { return read(pin); };
-
-    int16_t humidity;
-    int16_t temperature;
-    uint8_t bits[5];  // buffer to receive data
-
+        uint8_t thermocouple_temp;
+        uint8_t fault;
+        uint8_t chip_temp;
+        uint8_t scv_fault;
+        uint8_t scg_fault;
+        uint8_t oc_fault;
 private:
-    
-    int _readSensor(uint8_t pin, uint8_t wakeupDelay);
+	uint8_t data;
+	uint8_t clock;
+	uint8_t latch;
+
 };
 #endif
-//
-// END OF FILE
-//
