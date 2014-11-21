@@ -33,11 +33,6 @@ uint8_t cool_down = 10;
 uint16_t on_time;
 uint16_t off_time;
 uint8_t init_temp;
-uint8_t delta = 1;
-
-uint64_t initial_time;
-uint64_t elapsed_time;
-uint64_t diff_time_min;
 
 Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
 DHT dht;
@@ -149,26 +144,7 @@ void loop()
                 state = state + 1;
                 break;
         case 7:  //Soak Time
-                on_time = 100;
-                off_time = 100;
-        
-                initial_time = millis();
-                elapsed_time = millis();
-                diff_time_min = (elapsed_time - initial_time) / 60000;
-                
-                while(diff_time_min < soak_time)
-                {
-                  read_temps();
-                  if(CtoF(thermo[0].thermocouple_temp) < max_temp - delta)
-                  {
-                    digitalWrite(SSR_PIN, 1);
-                    delay(on_time);
-                    digitalWrite(SSR_PIN, 0);
-                    delay(off_time);
-                  }
-                  elapsed_time = millis();
-                  diff_time_min = (elapsed_time - initial_time) / 60000;
-                }
+                run_soak_time();
                 state = state + 1;
                 break;
         case 8:  //Cool Down
@@ -194,6 +170,150 @@ void loop()
       		lcd.print("Finished");
                 while(1);	
   	}
+}
+
+void run_soak_time(void)
+{
+    uint8_t delta = 1;
+    uint32_t initial_time;
+    uint32_t elapsed_time;
+    uint32_t diff_time_min;
+    uint8_t screen = 0;
+    
+    on_time = 100;
+    off_time = 100;
+    
+    initial_time = millis();
+    elapsed_time = millis();
+    diff_time_min = (elapsed_time - initial_time) / 60000;
+    
+    lcd.clear();
+    print_elapsed(1, diff_time_min);
+    print_time_left(0, soak_time - diff_time_min);
+    
+    while(diff_time_min < soak_time)
+    {
+      read_temps();
+      if(CtoF(thermo[0].thermocouple_temp) < max_temp - delta)
+      {
+        digitalWrite(SSR_PIN, 1);
+        delay(on_time);
+        digitalWrite(SSR_PIN, 0);
+        delay(off_time);
+      }
+      elapsed_time = millis();
+      diff_time_min = (elapsed_time - initial_time) / 60000;
+      
+      uint8_t buttons = lcd.readButtons();
+      if (buttons) {
+        if(buttons & BUTTON_UP) 
+        {
+          if(screen == 0){ screen = 7;}
+          else{screen--;}
+          delay(500);
+        }
+        else if(buttons & BUTTON_DOWN) 
+        {
+          if(screen == 7){ screen = 0;}
+          else{screen++;}
+          delay(500);
+        }
+        lcd.clear();
+        switch(screen)
+        {
+          case 0:
+              print_elapsed(1, diff_time_min);
+              print_time_left(0, soak_time - diff_time_min);
+              break;
+          case 1:
+              print_time_left(1, soak_time - diff_time_min);
+              print_thermo(0,0);
+              break;
+          case 2:
+              print_thermo(0,1);
+              print_thermo(1,0);
+              break;
+          case 3:
+              print_thermo(1,1);
+              print_thermo(2,0);
+              break;
+          case 4:
+              print_thermo(2,1);
+              print_thermo(3,0);
+              break;
+          case 5:
+              print_thermo(3,1);
+              print_dht(0,0);
+              break;
+          case 6:
+              print_dht(0,1);
+              print_dht(1,0);
+              break;
+          case 7:
+              print_dht(1,1);
+              print_elapsed(0, diff_time_min);
+              break;
+        } 
+      }
+   }
+}
+
+void print_elapsed(uint8_t row, uint32_t print_time)
+{
+    lcd.setCursor(0,row);
+    lcd.print("Elapsed:");
+    lcd.setCursor(13,row);
+    lcd.print("min");
+    lcd.setCursor(10,row);
+    lcd.print(print_time);
+}
+
+void print_time_left(uint8_t row, uint32_t print_time)
+{
+    lcd.setCursor(0,row);
+    lcd.print("To go:");
+    lcd.setCursor(13,row);
+    lcd.print("min");
+    lcd.setCursor(10,row);
+    lcd.print(print_time);
+}
+
+void print_thermo(uint8_t index, uint8_t row)
+{
+    lcd.setCursor(0,row);
+    lcd.print("Temp");
+    lcd.setCursor(5,row);
+    lcd.print(index);
+    lcd.setCursor(6,row);
+    lcd.print(":");
+    lcd.setCursor(12,row);
+    lcd.print("degF");
+    lcd.setCursor(8,row);
+    lcd.print(CtoF(thermo[index].thermocouple_temp));
+}
+
+void print_dht(uint8_t index, uint8_t row)
+{
+    lcd.setCursor(0,row);
+    
+    if(index == 0)
+    {
+      lcd.print("DHT Temp:");
+      lcd.setCursor(12,row);
+      lcd.print("degF");
+      lcd.setCursor(8,row);
+      lcd.print(CtoF(dht.temperature));
+    }
+    else
+    {
+      lcd.print("DHT Hum:");
+      lcd.setCursor(15,row);
+      lcd.print("%");
+      lcd.setCursor(8,row);
+      lcd.print(dht.humidity);
+    }
+    
+
 }
 
 uint8_t CtoF(uint8_t temp_C)
