@@ -18,7 +18,10 @@
 #define DHTPIN 0     	// what pin we're connected to
 #define MAX31855_DATA 1
 #define MAX31855_CLK 2
-#define MAX31855_LAT 3
+#define MAX31855_LAT0 3
+#define MAX31855_LAT1 3
+#define MAX31855_LAT2 3
+#define MAX31855_LAT3 3
 #define SSR_PIN 4
 
 uint8_t state = 0;
@@ -27,13 +30,27 @@ uint8_t soak_time = 25;
 uint8_t ramp_rate = 10;
 uint8_t cool_down = 10;
 
+uint16_t on_time;
+uint16_t off_time;
+uint8_t init_temp;
+uint8_t delta = 1;
+
+uint64_t initial_time;
+uint64_t elapsed_time;
+uint64_t diff_time_min;
+
 Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
 DHT dht;
-MAX31855 thermo;
+MAX31855 thermo[4];
 
 void setup()
 {
-	thermo.setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT);
+	thermo[0].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT0);
+        thermo[1].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT1);
+        thermo[2].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT2);
+        thermo[3].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT3);
+        
+        pinMode(SSR_PIN, OUTPUT);
 
 	Serial.begin(9600);
 
@@ -113,13 +130,85 @@ void loop()
                 }
                 state = state + 1;
 	      	break;
-	case 6:
-		//dht.read22(DHTPIN);
+	case 6:  //Ramp Up
+                on_time = 100;
+                off_time = 200;
+
+                read_temps();
+                init_temp = CtoF(thermo[0].thermocouple_temp);
+                
+                while(CtoF(thermo[0].thermocouple_temp) < max_temp)
+                {
+                  digitalWrite(SSR_PIN, 1);
+                  delay(on_time);
+                  digitalWrite(SSR_PIN, 0);
+                  delay(off_time);
+                  
+                  read_temps();
+                }
+                state = state + 1;
+                break;
+        case 7:  //Soak Time
+                on_time = 100;
+                off_time = 100;
+        
+                initial_time = millis();
+                elapsed_time = millis();
+                diff_time_min = (elapsed_time - initial_time) / 60000;
+                
+                while(diff_time_min < soak_time)
+                {
+                  read_temps();
+                  if(CtoF(thermo[0].thermocouple_temp) < max_temp - delta)
+                  {
+                    digitalWrite(SSR_PIN, 1);
+                    delay(on_time);
+                    digitalWrite(SSR_PIN, 0);
+                    delay(off_time);
+                  }
+                  elapsed_time = millis();
+                  diff_time_min = (elapsed_time - initial_time) / 60000;
+                }
+                state = state + 1;
+                break;
+        case 8:  //Cool Down
+                on_time = 100;
+                off_time = 200;
+                
+                read_temps();
+                
+                while(CtoF(thermo[0].thermocouple_temp) > init_temp)
+                {
+                  digitalWrite(SSR_PIN, 1);
+                  delay(on_time);
+                  digitalWrite(SSR_PIN, 0);
+                  delay(off_time);
+                  
+                  read_temps();
+                }
+                state = state + 1;
+                break;
+        case 9:  //Finished
                 lcd.clear();
     		lcd.setCursor(0,0);
-      		lcd.print("Running");
+      		lcd.print("Finished");
                 while(1);	
   	}
+}
+
+uint8_t CtoF(uint8_t temp_C)
+{
+  uint8_t temp_F = (temp_C * 1.8) + 32;
+  return temp_F; 
+}
+
+void read_temps(void)
+{
+  for(uint8_t i = 0; i<4; i++)
+  {
+    thermo[i].read_temp();
+  }
+  dht.read22(DHTPIN);
 }
 
 uint8_t enter_value(uint8_t init_value)
