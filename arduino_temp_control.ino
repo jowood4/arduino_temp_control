@@ -4,6 +4,7 @@
 #include "Adafruit_MCP23017.h"
 #include "Adafruit_RGBLCDShield.h"
 #include "Wire.h"
+#include "PID_v1.h"
 
 #define RED 0x1
 #define YELLOW 0x3
@@ -23,6 +24,7 @@
 #define MAX31855_LAT2 3
 #define MAX31855_LAT3 3
 #define SSR_PIN 4
+#define SD_CSB 4
 
 uint8_t state = 0;
 uint8_t max_temp = 25;
@@ -30,9 +32,9 @@ uint8_t soak_time = 25;
 uint8_t ramp_rate = 10;
 uint8_t cool_down = 10;
 
-uint16_t on_time;
-uint16_t off_time;
 uint8_t init_temp;
+
+File dataFile;
 
 Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
 DHT dht;
@@ -40,6 +42,9 @@ MAX31855 thermo[4];
 
 void setup()
 {
+        lcd.begin(16, 2);
+	lcd.setBacklight(WHITE);
+  
 	thermo[0].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT0);
         thermo[1].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT1);
         thermo[2].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT2);
@@ -49,8 +54,23 @@ void setup()
 
 	Serial.begin(9600);
 
-	lcd.begin(16, 2);
-	lcd.setBacklight(WHITE);
+        //SD Card Init
+        pinMode(10, OUTPUT);
+        if (!SD.begin(SD_CSB))
+        {
+            lcd.clear();
+    	    lcd.setCursor(0,0);
+            lcd.print("SD Card Failed");
+            return;
+        }
+        dataFile = SD.open("datalog.txt", FILE_WRITE);
+        if (!dataFile)
+        {
+            lcd.clear();
+    	    lcd.setCursor(0,0);
+            lcd.print("SD File Error");
+            return;
+        }
 }
  
 void loop()
@@ -64,7 +84,7 @@ void loop()
       		lcd.print("Composites");
 	      	
 		delay(3000);
-		state = 1;
+		state = state + 1;
 		break;
 	case 1:
 	      	lcd.clear();
@@ -126,62 +146,152 @@ void loop()
                 state = state + 1;
 	      	break;
 	case 6:  //Ramp Up
-                on_time = 100;
-                off_time = 200;
-
                 read_temps();
                 init_temp = CtoF(thermo[0].thermocouple_temp);
                 
-                while(CtoF(thermo[0].thermocouple_temp) < max_temp)
-                {
-                  digitalWrite(SSR_PIN, 1);
-                  delay(on_time);
-                  digitalWrite(SSR_PIN, 0);
-                  delay(off_time);
-                  
-                  read_temps();
-                }
+                run_ramp_time();
                 state = state + 1;
                 break;
         case 7:  //Soak Time
-                run_soak_time();
+                run_ramp_time();
                 state = state + 1;
                 break;
         case 8:  //Cool Down
-                on_time = 100;
-                off_time = 200;
-                
-                read_temps();
-                
-                while(CtoF(thermo[0].thermocouple_temp) > init_temp)
-                {
-                  digitalWrite(SSR_PIN, 1);
-                  delay(on_time);
-                  digitalWrite(SSR_PIN, 0);
-                  delay(off_time);
-                  
-                  read_temps();
-                }
+                run_ramp_time();
                 state = state + 1;
                 break;
         case 9:  //Finished
                 lcd.clear();
     		lcd.setCursor(0,0);
       		lcd.print("Finished");
+                dataFile.close();
                 while(1);	
   	}
 }
 
-void run_soak_time(void)
+void write_SD(void)
 {
-    uint8_t delta = 1;
+    String dataString = "";
+    dataString += "Time: ";
+    //dataString += String(time);
+    dataString += ", T0: ";
+    dataString += String(CtoF(thermo[0].thermocouple_temp));
+    dataString += "degF, T1: ";
+    dataString += String(CtoF(thermo[1].thermocouple_temp));
+    dataString += "degF, T2: ";
+    dataString += String(CtoF(thermo[2].thermocouple_temp));
+    dataString += "degF, T3: ";
+    dataString += String(CtoF(thermo[3].thermocouple_temp));
+    dataString += "degF, DHT Temp: ";
+    dataString += String(CtoF(dht.temperature));
+    dataString += "degF, DHT Humidity: ";
+    dataString += String(CtoF(dht.humidity));
+    dataString += "%";
+    dataFile.println(dataString);
+}
+
+void run_PID(double Kp, double Ki, double Kd, uint16_t WindowSize, double Setpoint)
+{
+    double Input, Output;
+    uint32_t windowStartTime = millis();
+
+    //Specify the links and initial tuning parameters
+    PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
+    myPID.SetOutputLimits(0, WindowSize);
+    myPID.SetMode(AUTOMATIC);
+   
+    read_temps();
+    Input = CtoF(thermo[0].thermocouple_temp);
+    
+    while(Output < millis() - windowStartTime)
+    {
+      digitalWrite(SSR_PIN, 1);
+    }
+    while(millis() < WindowSize + windowStartTime)
+    {
+      digitalWrite(SSR_PIN, 0);
+    }
+}
+
+void running_menu(uint8_t screen, uint32_t time_elapsed, uint32_t time_left)
+{
+    uint8_t buttons = lcd.readButtons();
+    if (buttons)
+    {
+        if(buttons & BUTTON_UP) 
+        {
+            if(screen == 0){ screen = 7;}
+            else{screen--;}
+            delay(500);
+        }
+        else if(buttons & BUTTON_DOWN) 
+        {
+            if(screen == 7){ screen = 0;}
+            else{screen++;}
+            delay(500);
+        }
+        lcd.clear();
+        switch(screen)
+        {
+             case 0:
+                 print_elapsed(1, time_elapsed);
+                 print_time_left(0, time_left);
+                 break;
+             case 1:
+                 print_time_left(1, time_left);
+                 print_thermo(0,0);
+                 break;
+             case 2:
+                 print_thermo(0,1);
+                 print_thermo(1,0);
+                 break;
+             case 3:
+                 print_thermo(1,1);
+                 print_thermo(2,0);
+                 break;
+             case 4:
+                 print_thermo(2,1);
+                 print_thermo(3,0);
+                 break;
+             case 5:
+                 print_thermo(3,1);
+                 print_dht(0,0);
+                 break;
+             case 6:
+                 print_dht(0,1);
+                 print_dht(1,0);
+                 break;
+             case 7:
+                 print_dht(1,1);
+                 print_elapsed(0, time_elapsed);
+                 break;
+            } 
+        }
+}
+
+void run_ramp_time(void)
+{
     uint32_t initial_time;
     uint32_t elapsed_time;
     uint32_t diff_time_min;
     uint8_t screen = 0;
+    uint32_t ramp_time;
+    double set_temp;
     
-    on_time = 100;
-    off_time = 100;
+    if(state == 6)  //rising ramp, increasing temperature
+    {
+        read_temps();
+        ramp_time = (max_temp - CtoF(thermo[0].thermocouple_temp))/ramp_rate;
+    }
+    else if(state == 7) //soak time
+    {
+        ramp_time = soak_time; 
+    }
+    else if(state == 8)  //falling ramp, decreasing temperature
+    {
+        read_temps();
+        ramp_time = (CtoF(thermo[0].thermocouple_temp) - init_temp)/cool_down;      
+    }
     
     initial_time = millis();
     elapsed_time = millis();
@@ -191,70 +301,25 @@ void run_soak_time(void)
     print_elapsed(1, diff_time_min);
     print_time_left(0, soak_time - diff_time_min);
     
-    while(diff_time_min < soak_time)
-    {
-      read_temps();
-      if(CtoF(thermo[0].thermocouple_temp) < max_temp - delta)
-      {
-        digitalWrite(SSR_PIN, 1);
-        delay(on_time);
-        digitalWrite(SSR_PIN, 0);
-        delay(off_time);
-      }
-      elapsed_time = millis();
-      diff_time_min = (elapsed_time - initial_time) / 60000;
-      
-      uint8_t buttons = lcd.readButtons();
-      if (buttons) {
-        if(buttons & BUTTON_UP) 
-        {
-          if(screen == 0){ screen = 7;}
-          else{screen--;}
-          delay(500);
-        }
-        else if(buttons & BUTTON_DOWN) 
-        {
-          if(screen == 7){ screen = 0;}
-          else{screen++;}
-          delay(500);
-        }
-        lcd.clear();
-        switch(screen)
-        {
-          case 0:
-              print_elapsed(1, diff_time_min);
-              print_time_left(0, soak_time - diff_time_min);
-              break;
-          case 1:
-              print_time_left(1, soak_time - diff_time_min);
-              print_thermo(0,0);
-              break;
-          case 2:
-              print_thermo(0,1);
-              print_thermo(1,0);
-              break;
-          case 3:
-              print_thermo(1,1);
-              print_thermo(2,0);
-              break;
-          case 4:
-              print_thermo(2,1);
-              print_thermo(3,0);
-              break;
-          case 5:
-              print_thermo(3,1);
-              print_dht(0,0);
-              break;
-          case 6:
-              print_dht(0,1);
-              print_dht(1,0);
-              break;
-          case 7:
-              print_dht(1,1);
-              print_elapsed(0, diff_time_min);
-              break;
-        } 
-      }
+    while(diff_time_min < ramp_time)
+    {   
+          if(state == 6)  //rising ramp, increasing temperature
+          {
+              set_temp = (diff_time_min * ramp_rate) + init_temp;
+          }
+          else if(state == 7) //soak time
+          {
+              set_temp = max_temp; 
+          }
+          else if(state == 8)  //falling ramp, decreasing temperature
+          {
+              set_temp = max_temp - (diff_time_min * cool_down);      
+          }
+          run_PID(2, 5, 1, 1000, max_temp);
+          elapsed_time = millis();
+          diff_time_min = (elapsed_time - initial_time) / 60000;
+        
+          running_menu(screen, diff_time_min, soak_time - diff_time_min);
    }
 }
 
