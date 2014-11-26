@@ -16,14 +16,14 @@
 
 #define DHTTYPE DHT22   // DHT 22  (AM2302)
 
-#define DHTPIN 0     	// what pin we're connected to
-#define MAX31855_DATA 1
-#define MAX31855_CLK 2
-#define MAX31855_LAT0 3
-#define MAX31855_LAT1 3
-#define MAX31855_LAT2 3
-#define MAX31855_LAT3 3
-#define SSR_PIN 4
+#define DHTPIN 6     	// what pin we're connected to
+#define MAX31855_DATA 12
+#define MAX31855_CLK 13
+#define MAX31855_LAT0 10
+#define MAX31855_LAT1 9
+#define MAX31855_LAT2 8
+#define MAX31855_LAT3 7
+#define SSR_PIN 5
 #define SD_CSB 4
 
 uint8_t state = 0;
