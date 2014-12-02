@@ -6,6 +6,12 @@
 #include "Wire.h"
 #include "PID_v1.h"
 
+#define SPI_transfer 1
+
+#if defined(SPI_transfer)
+#include "SPI.h"
+#endif
+
 #define RED 0x1
 #define YELLOW 0x3
 #define GREEN 0x2
@@ -45,10 +51,14 @@ void setup()
         lcd.begin(16, 2);
 	lcd.setBacklight(WHITE);
   
-	thermo[0].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT0);
-        thermo[1].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT1);
-        thermo[2].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT2);
-        thermo[3].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT3);
+	//thermo[0].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT0);
+        //thermo[1].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT1);
+        //thermo[2].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT2);
+        //thermo[3].setup(MAX31855_DATA, MAX31855_CLK, MAX31855_LAT3);
+        thermo[0].setup(MAX31855_LAT0);
+        thermo[1].setup(MAX31855_LAT1);
+        thermo[2].setup(MAX31855_LAT2);
+        thermo[3].setup(MAX31855_LAT3);
         
         pinMode(SSR_PIN, OUTPUT);
 
