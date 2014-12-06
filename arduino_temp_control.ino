@@ -39,17 +39,18 @@ uint8_t soak_time = 10;
 uint8_t ramp_rate = 10;
 uint8_t cool_down = 10;
 
-double init_temp;
-
 File dataFile;
 
 Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
 DHT dht;
 MAX31855 thermo[4];
 
+double init_temp;
 double Input, Output, Setpoint;
-uint32_t PID_interval = 1000;
+uint32_t init_read = 1;  //flag to prevent 2 temp reads on first PID pass
+uint32_t PID_interval = 1000;  //time in ms to run PID interval
 PID myPID(&Input, &Output, &Setpoint, 2, 5, 1, DIRECT);
+uint8_t screen = 0;  //index of menu to display while running
 
 void setup()
 {
@@ -161,9 +162,6 @@ void loop()
                 state = state + 1;
 	      	break;
 	case 6:  //Ramp Up
-                read_temps();
-                init_temp = CtoF(thermo[0].thermocouple_temp);
-                
                 run_ramp_time();
                 state = state + 1;
                 break;
@@ -185,49 +183,76 @@ void loop()
   	}
 }
 
-void run_PID(double Kp, double Ki, double Kd, uint16_t WindowSize, double time_interval)
+void run_PID(double Kp, double Ki, double Kd, uint16_t WindowSize, uint32_t time_interval, double time_elapsed, double time_left)
 {
     double ratio;
-    uint32_t windowStartTime = millis();
+    uint32_t windowStartTime;
+    uint8_t buttons;
 
     //Specify the links and initial tuning parameters
     myPID.SetOutputLimits(0, WindowSize);
     myPID.SetTunings(Kp, Ki, Kd);
     myPID.SetMode(AUTOMATIC);
    
-    read_temps();
+    if(init_read){init_read = 0;Setpoint = Setpoint + 1;}
+    else{read_temps();}
+    
+    windowStartTime = millis();
+    
     Input = CtoF(thermo[0].thermocouple_temp);
-    //Input = 90;
+    //Input = CtoF(thermo[0].chip_temp);
+    //Input = 25;
     //Setpoint = 100;
     myPID.Compute();
     
     while(Output == 0) myPID.Compute();
     ratio = Output / WindowSize;
+    //ratio = Output / max_temp;
 
+    digitalWrite(SSR_PIN, 1);
     while(millis() - windowStartTime < time_interval * ratio)
     {
-      digitalWrite(SSR_PIN, 1);
+      //Serial.println(millis());
+      buttons = lcd.readButtons();
+      //Serial.println(millis());
+      if(buttons)
+      {
+        //Serial.println(buttons);
+        running_menu(buttons, time_elapsed, time_left);
+        delay(250);
+      }
     }
+    digitalWrite(SSR_PIN, 0);
+
     while(millis() - windowStartTime < time_interval)
     {
-      digitalWrite(SSR_PIN, 0);
+      //Serial.println(millis() - windowStartTime);
+      buttons = lcd.readButtons();
+      //Serial.println(millis());
+      //Serial.println("here2");
+      if(buttons)
+      {
+        //Serial.println(buttons);
+        running_menu(buttons, time_elapsed, time_left);
+        delay(250);
+      }
     }
 }
 
 void run_ramp_time(void)
 {
-    uint32_t initial_time;
-    uint32_t elapsed_time;
+    uint32_t initial_time = millis();
+    uint32_t elapsed_time, time1, time2;
     double diff_time_min;
-    uint8_t screen = 0;
     double ramp_time;
     double set_temp;
     
     if(state == 6)  //rising ramp, increasing temperature
     {
         read_temps();
-        ramp_time = (max_temp - CtoF(thermo[0].thermocouple_temp))/ramp_rate;
-        //ramp_time = (60 - CtoF(0))/ramp_rate;
+        init_temp = CtoF(thermo[0].thermocouple_temp);
+        //init_temp = CtoF(thermo[0].chip_temp);
+        ramp_time = (max_temp - init_temp)/ramp_rate;
     }
     else if(state == 7) //soak time
     {
@@ -238,9 +263,7 @@ void run_ramp_time(void)
         read_temps();
         ramp_time = (CtoF(thermo[0].thermocouple_temp) - init_temp)/cool_down;      
     }
-    
-    //Serial.println(ramp_time);
-    initial_time = millis();
+
     elapsed_time = millis();
     diff_time_min = (elapsed_time - initial_time) / 60000;
     
@@ -252,6 +275,7 @@ void run_ramp_time(void)
     {   
           if(state == 6)  //rising ramp, increasing temperature
           {
+              //While increasing, Setpoint increases based on elapsed time
               set_temp = (diff_time_min * ramp_rate) + init_temp;
           }
           else if(state == 7) //soak time
@@ -260,16 +284,17 @@ void run_ramp_time(void)
           }
           else if(state == 8)  //falling ramp, decreasing temperature
           {
+              //While decreasing, Setpoint increases based on elapsed time
               set_temp = max_temp - (diff_time_min * cool_down);      
           }
           Setpoint = set_temp;
-          run_PID(2, 5, 1, 500, PID_interval);
+          run_PID(2, 5, 1, 500, PID_interval, diff_time_min, ramp_time - diff_time_min);
           elapsed_time = millis();
           diff_time_min = (elapsed_time - initial_time) / 60000;
+          running_menu(lcd.readButtons(), diff_time_min, ramp_time - diff_time_min);
           //Serial.println(diff_time_min);
-          //Serial.println(soak_time - diff_time_min);
-          running_menu(screen, diff_time_min, ramp_time - diff_time_min);
     }
+    //Serial.println("here");
 }
 
 void print_time(uint8_t row, uint32_t print_time, uint8_t elapsed)
@@ -337,7 +362,7 @@ void read_temps(void)
   {
     thermo[i].read_temp();
   }
-  dht.read22(DHTPIN);
+  //dht.read22(DHTPIN);
 }
 
 uint8_t enter_value(uint8_t init_value)
@@ -471,23 +496,19 @@ void write_SD(void)
     dataFile.println(dataString);
 }
 
-void running_menu(uint8_t screen, double time_elapsed, double time_left)
+void running_menu(uint8_t buttons, double time_elapsed, double time_left)
 {
-    uint8_t buttons = lcd.readButtons();
-    if (buttons)
+    if(buttons & BUTTON_UP) 
     {
-        if(buttons & BUTTON_UP) 
-        {
-            if(screen == 0){ screen = 7;}
-            else{screen--;}
-            delay(500);
-        }
-        else if(buttons & BUTTON_DOWN) 
-        {
-            if(screen == 7){ screen = 0;}
-            else{screen++;}
-            delay(500);
-        }
+        if(screen == 0){ screen = 7;}
+        else{screen--;}
+        delay(500);
+    }
+    else if(buttons & BUTTON_DOWN) 
+    {
+        if(screen == 7){ screen = 0;}
+        else{screen++;}
+        delay(500);
     }
     lcd.clear();
     switch(screen)
